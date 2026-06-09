@@ -1,0 +1,15 @@
+template-file-path: templates/ecs.yaml
+stack-name: ecs-lab-ecs
+sync-type: CFN_STACK_SYNC
+deployment-targets:
+  accounts:
+    - "711387109786"
+  regions:
+    - eu-central-1
+parameters:
+  - parameter-key: ProjectName
+    parameter-value: ecs-lab
+  - parameter-key: ContainerPort
+    parameter-value: "8080"
+  - parameter-key: HealthCheckPath
+    parameter-value: /actuator/health

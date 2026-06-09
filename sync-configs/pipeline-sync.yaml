@@ -1,0 +1,19 @@
+template-file-path: templates/pipeline.yaml
+stack-name: ecs-lab-pipeline
+sync-type: CFN_STACK_SYNC
+deployment-targets:
+  accounts:
+    - "711387109786"
+  regions:
+    - eu-central-1
+parameters:
+  - parameter-key: ProjectName
+    parameter-value: ecs-lab
+  - parameter-key: GitHubOrg
+    parameter-value: alpShema
+  - parameter-key: GitHubAppRepo
+    parameter-value: ecs-lab-app
+  - parameter-key: GitHubInfraRepo
+    parameter-value: ecs-lab-infra
+  - parameter-key: GitHubBranch
+    parameter-value: main

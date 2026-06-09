@@ -1,0 +1,365 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ECS CI/CD lab - Pipeline stack.
+  Creates the GitHub Actions OIDC IAM role, S3 artifact bucket,
+  EventBridge rule that fires on ECR image push, and CodePipeline
+  that deploys via CodeDeploy blue/green to ECS.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ecs-lab
+
+  GitHubOrg:
+    Type: String
+    Description: Your GitHub username or organisation name.
+    # e.g. john-doe
+
+  GitHubAppRepo:
+    Type: String
+    Description: Name of your application GitHub repository.
+    # e.g. ecs-lab-app
+
+  GitHubInfraRepo:
+    Type: String
+    Description: Name of your infrastructure GitHub repository.
+    # e.g. ecs-lab-infra
+
+  GitHubBranch:
+    Type: String
+    Default: main
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ── S3 Artifact Bucket ────────────────────────────────────────────────────
+  # Stores imagedefinitions.json uploaded by GitHub Actions.
+  # CodePipeline's Source stage reads from here.
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ProjectName}-artifacts-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled              # required by CodePipeline
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldArtifacts
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Bucket policy — only allow CodePipeline and GitHub Actions role to access
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSSLOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+          - Sid: AllowCodePipeline
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt CodePipelineRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+          - Sid: AllowGitHubActionsRole
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt GitHubActionsRole.Arn
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+
+  # ── GitHub Actions OIDC Identity Provider ────────────────────────────────
+  # Tells AWS to trust JWTs signed by GitHub's OIDC provider.
+  # Only needs to exist once per AWS account — if you already have it,
+  # comment this resource out and reference the existing provider ARN.
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # GitHub's current OIDC thumbprint (valid as of 2024)
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ── IAM Role for GitHub Actions ───────────────────────────────────────────
+  # GitHub Actions assumes this role via OIDC to push images to ECR
+  # and upload imagedefinitions.json to S3.
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-github-actions-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+              StringLike:
+                # Scope to your specific app repo and branch only
+                'token.actions.githubusercontent.com:sub':
+                  !Sub 'repo:${GitHubOrg}/${GitHubAppRepo}:ref:refs/heads/${GitHubBranch}'
+      Policies:
+        - PolicyName: ECRPushPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ECRAuth
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: ECRPush
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                Resource:
+                  Fn::Sub:
+                    - arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${RepoName}
+                    - RepoName:
+                        Fn::ImportValue: !Sub ${ProjectName}-EcrName
+              - Sid: S3ArtifactUpload
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub ${ArtifactBucket.Arn}/*
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ── CodePipeline IAM Role ─────────────────────────────────────────────────
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-codepipeline-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource: !Sub ${ArtifactBucket.Arn}/*
+              - Sid: S3List
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ArtifactBucket.Arn
+              - Sid: CodeDeployAccess
+                Effect: Allow
+                Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:RegisterApplicationRevision
+                Resource: '*'
+              - Sid: ECSAccess
+                Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                Resource: '*'
+              - Sid: PassRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: '*'
+                Condition:
+                  StringEqualsIfExists:
+                    'iam:PassedToService':
+                      - ecs-tasks.amazonaws.com
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ── EventBridge Role (invoke CodePipeline) ────────────────────────────────
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-eventbridge-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartPipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ── CodePipeline ──────────────────────────────────────────────────────────
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${ProjectName}-pipeline
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        # Stage 1: Source — reads imagedefinitions.json from S3
+        # GitHub Actions uploads this file after every successful image push
+        - Name: Source
+          Actions:
+            - Name: ImageDefinitions
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              Configuration:
+                S3Bucket: !Ref ArtifactBucket
+                S3ObjectKey: imagedefinitions.json
+                PollForSourceChanges: 'false'   # EventBridge triggers instead
+              OutputArtifacts:
+                - Name: SourceArtifact
+              RunOrder: 1
+
+        # Stage 2: Deploy — CodeDeploy blue/green to ECS
+        - Name: Deploy
+          Actions:
+            - Name: BlueGreenDeploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeployToECS
+                Version: '1'
+              Configuration:
+                ApplicationName:
+                  Fn::ImportValue: !Sub ${ProjectName}-CodeDeployApp
+                DeploymentGroupName:
+                  Fn::ImportValue: !Sub ${ProjectName}-CodeDeployDg
+                TaskDefinitionTemplateArtifact: SourceArtifact
+                AppSpecTemplateArtifact: SourceArtifact
+                Image1ArtifactName: SourceArtifact
+                Image1ContainerName: IMAGE1_NAME
+              InputArtifacts:
+                - Name: SourceArtifact
+              RunOrder: 1
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ── EventBridge Rule ──────────────────────────────────────────────────────
+  # Fires when GitHub Actions successfully pushes a new image to ECR.
+  # Automatically starts the pipeline — no polling needed.
+  EcrPushEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ProjectName}-ecr-push-rule
+      Description: Trigger CodePipeline on ECR image push
+      EventPattern:
+        source:
+          - aws.ecr
+        detail-type:
+          - ECR Image Action
+        detail:
+          action-type:
+            - PUSH
+          result:
+            - SUCCESS
+          repository-name:
+            - Fn::ImportValue: !Sub ${ProjectName}-EcrName
+      State: ENABLED
+      Targets:
+        - Id: TriggerPipeline
+          Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  GitHubActionsRoleArn:
+    Description: >
+      Set this as the AWS_ROLE_ARN secret in your app GitHub repo.
+      Settings → Secrets and variables → Actions → New repository secret.
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-GitHubActionsRoleArn
+
+  ArtifactBucketName:
+    Description: >
+      Set this as the PIPELINE_ARTIFACT_BUCKET secret in your app GitHub repo.
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: !Sub ${ProjectName}-ArtifactBucket
+
+  PipelineUrl:
+    Description: Direct link to the pipeline in the AWS Console.
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${Pipeline}/view
+
+  AlbEndpoint:
+    Description: Your application is accessible at this URL.
+    Value: !Sub
+      - http://${Dns}
+      - Dns:
+          Fn::ImportValue: !Sub ${ProjectName}-AlbDns
