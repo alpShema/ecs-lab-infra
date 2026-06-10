@@ -3,9 +3,6 @@ stack-name: ecs-lab-pipeline
 sync-type: CFN_STACK_SYNC
 deployment-targets:
   accounts:
-    - "711387109786"
-  regions:
-    - eu-central-1
 parameters:
   - parameter-key: ProjectName
     parameter-value: ecs-lab
