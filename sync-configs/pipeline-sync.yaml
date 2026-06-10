@@ -1,8 +1,5 @@
 template-file-path: templates/pipeline.yaml
-stack-name: ecs-lab-pipeline
 sync-type: CFN_STACK_SYNC
-deployment-targets:
-  accounts:
 parameters:
   - parameter-key: ProjectName
     parameter-value: ecs-lab

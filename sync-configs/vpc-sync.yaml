@@ -3,7 +3,6 @@
 # with templates/vpc.yaml on every push to the watched branch.
 
 template-file-path: templates/vpc.yaml
-stack-name: ecs-lab-vpc
 sync-type: CFN_STACK_SYNC
 parameters:
   - parameter-key: ProjectName
