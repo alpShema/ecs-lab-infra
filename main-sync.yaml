@@ -1,4 +1,4 @@
-template-file-path: templates/main.yaml
+template-file-path: main.yaml
 sync-type: CFN_STACK_SYNC
 parameters:
   - parameter-key: ProjectName
