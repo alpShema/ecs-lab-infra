@@ -1,9 +1,9 @@
-# GitSync configuration for the VPC stack.
-# CloudFormation reads this file and keeps the stack in sync
-# with templates/vpc.yaml on every push to the watched branch.
-
 template-file-path: templates/vpc.yaml
-sync-type: CFN_STACK_SYNC
 parameters:
-  - parameter-key: ProjectName
-    parameter-value: ecs-lab
+  PrivateSubnetACidr: 10.0.3.0/24
+  PrivateSubnetBCidr: 10.0.4.0/24
+  VpcCidr: 10.0.0.0/16
+  PublicSubnetBCidr: 10.0.2.0/24
+  ProjectName: ecs-lab
+  PublicSubnetACidr: 10.0.1.0/24
+tags: {}
