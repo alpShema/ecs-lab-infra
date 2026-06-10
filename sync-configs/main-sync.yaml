@@ -1,0 +1,17 @@
+template-file-path: templates/main.yaml
+sync-type: CFN_STACK_SYNC
+parameters:
+  - parameter-key: ProjectName
+    parameter-value: ecs-lab
+  - parameter-key: GitHubOrg
+    parameter-value: alpShema
+  - parameter-key: GitHubAppRepo
+    parameter-value: ecs-lab-app
+  - parameter-key: GitHubInfraRepo
+    parameter-value: ecs-lab-infra
+  - parameter-key: GitHubBranch
+    parameter-value: main
+  - parameter-key: ContainerPort
+    parameter-value: "8080"
+  - parameter-key: HealthCheckPath
+    parameter-value: /actuator/health
