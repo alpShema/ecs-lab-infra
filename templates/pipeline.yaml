@@ -38,7 +38,7 @@ Parameters:
 Resources:
 
   # ── S3 Artifact Bucket ────────────────────────────────────────────────────
-  # Stores imagedefinitions.json uploaded by GitHub Actions.
+  # Stores artifacts.zip (appspec.yaml + taskdef.json) uploaded by GitHub Actions.
   # CodePipeline's Source stage reads from here.
   ArtifactBucket:
     Type: AWS::S3::Bucket
@@ -265,8 +265,8 @@ Resources:
         Type: S3
         Location: !Ref ArtifactBucket
       Stages:
-        # Stage 1: Source — reads imagedefinitions.json from S3
-        # GitHub Actions uploads this file after every successful image push
+        # Stage 1: Source — reads artifacts.zip from S3
+        # GitHub Actions uploads this zip after every successful image push
         - Name: Source
           Actions:
             - Name: ImageDefinitions
@@ -277,7 +277,7 @@ Resources:
                 Version: '1'
               Configuration:
                 S3Bucket: !Ref ArtifactBucket
-                S3ObjectKey: imagedefinitions.json
+                S3ObjectKey: artifacts.zip
                 PollForSourceChanges: 'false'   # EventBridge triggers instead
               OutputArtifacts:
                 - Name: SourceArtifact
@@ -298,7 +298,9 @@ Resources:
                 DeploymentGroupName:
                   Fn::ImportValue: !Sub ${ProjectName}-CodeDeployDg
                 TaskDefinitionTemplateArtifact: SourceArtifact
+                TaskDefinitionTemplatePath: taskdef.json
                 AppSpecTemplateArtifact: SourceArtifact
+                AppSpecTemplatePath: appspec.yaml
                 Image1ArtifactName: SourceArtifact
                 Image1ContainerName: IMAGE1_NAME
               InputArtifacts:
@@ -345,6 +347,20 @@ Outputs:
     Value: !GetAtt GitHubActionsRole.Arn
     Export:
       Name: !Sub ${ProjectName}-GitHubActionsRoleArn
+
+  TaskExecutionRoleArn:
+    Description: Set this as the TASK_EXEC_ROLE_ARN secret in your app GitHub repo.
+    Value:
+      Fn::ImportValue: !Sub ${ProjectName}-TaskExecRoleArn
+    Export:
+      Name: !Sub ${ProjectName}-TaskExecRoleArnOut
+
+  TaskRoleArn:
+    Description: Set this as the TASK_ROLE_ARN secret in your app GitHub repo.
+    Value:
+      Fn::ImportValue: !Sub ${ProjectName}-TaskRoleArn
+    Export:
+      Name: !Sub ${ProjectName}-TaskRoleArnOut
 
   ArtifactBucketName:
     Description: >
