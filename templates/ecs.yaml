@@ -406,6 +406,16 @@ Outputs:
     Export:
       Name: !Sub ${ProjectName}-ServiceName
 
+  TaskExecutionRoleArn:
+    Value: !GetAtt TaskExecutionRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-TaskExecRoleArn
+
+  TaskRoleArn:
+    Value: !GetAtt TaskRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-TaskRoleArn
+
   CodeDeployAppName:
     Value: !Ref CodeDeployApplication
     Export:
