@@ -1,9 +1,0 @@
-template-file-path: templates/ecs.yaml
-sync-type: CFN_STACK_SYNC
-parameters:
-  - parameter-key: ProjectName
-    parameter-value: ecs-lab
-  - parameter-key: ContainerPort
-    parameter-value: "8080"
-  - parameter-key: HealthCheckPath
-    parameter-value: /actuator/health
