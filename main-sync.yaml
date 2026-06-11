@@ -1,14 +1,3 @@
 template-file-path: main.yaml
-sync-type: CFN_STACK_SYNC
-# Add this mandatory block to authorize IAM role creation via Git Sync
-capabilities:
-  - CAPABILITY_NAMED_IAM
-  - CAPABILITY_AUTO_EXPAND
-parameters:
-  ProjectName: ecs-lab
-  GitHubOrg: alpShema
-  GitHubAppRepo: ecs-lab-app
-  GitHubInfraRepo: ecs-lab-infra
-  GitHubBranch: main
-  ContainerPort: "8080"
-  HealthCheckPath: /actuator/health
+parameters: {}
+tags: {}
