@@ -792,18 +792,18 @@ Resources:
               - s3:GetObject
             Resource: !Sub ${ArtifactBucket.Arn}/*
 
-  GitHubOIDCProvider:
-    Type: AWS::IAM::OIDCProvider
-    Properties:
-      Url: https://token.actions.githubusercontent.com
-      ClientIdList:
-        - sts.amazonaws.com
-      ThumbprintList:
-        - 6938fd4d98bab03faadb97b34396831e3780aea1
-        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+  # GitHubOIDCProvider:
+  #   Type: AWS::IAM::OIDCProvider
+  #   Properties:
+  #     Url: https://token.actions.githubusercontent.com
+  #     ClientIdList:
+  #       - sts.amazonaws.com
+  #     ThumbprintList:
+  #       - 6938fd4d98bab03faadb97b34396831e3780aea1
+  #       - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+  #     Tags:
+  #       - Key: Project
+  #         Value: !Ref ProjectName
 
   GitHubActionsRole:
     Type: AWS::IAM::Role
