@@ -1,10 +1,28 @@
+# Tells Git Sync where your actual CloudFormation template file is located
 template-file-path: main.yaml
+
+# Mandatory parameter defining this sync as a standard CloudFormation Stack
 sync-type: CFN_STACK_SYNC
+
+# Your input values that map directly to the Parameters section of main.yaml
 parameters:
+  # The base name used to tag and identify all your infrastructure resources
   ProjectName: ecs-lab
+
+  #  GitHub Organization or username profile where the repos live
   GitHubOrg: alpShema
+
+  # The repository containing your application source code/Docker file
   GitHubAppRepo: ecs-lab-app
+
+  # The repository hosting your CloudFormation infrastructure templates
   GitHubInfraRepo: ecs-lab-infra
+
+  # The target branch AWS monitors to trigger automated deployments
   GitHubBranch: main
+
+  # The network port your application container listens on inside Fargate
   ContainerPort: "8080"
+
+  # The endpoint the Load Balancer hits to check if your container is healthy
   HealthCheckPath: /actuator/health
