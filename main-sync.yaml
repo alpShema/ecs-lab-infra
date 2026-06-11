@@ -1,5 +1,5 @@
-version: 1
-template-file: main.yaml
+template-file-path: main.yaml
+sync-type: CFN_STACK_SYNC
 parameters:
   ProjectName: ecs-lab
   GitHubOrg: alpShema
