@@ -781,8 +781,12 @@ Resources:
             Action:
               - s3:GetObject
               - s3:GetObjectVersion
+              - s3:GetBucketVersioning
               - s3:PutObject
-            Resource: !Sub ${ArtifactBucket.Arn}/*
+              - s3:ListBucket
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub ${ArtifactBucket.Arn}/*
           - Sid: AllowGitHubActionsRole
             Effect: Allow
             Principal:
@@ -883,9 +887,11 @@ Resources:
                   - s3:GetObjectVersion
                   - s3:PutObject
                 Resource: !Sub ${ArtifactBucket.Arn}/*
-              - Sid: S3List
+              - Sid: S3BucketAccess
                 Effect: Allow
-                Action: s3:ListBucket
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
                 Resource: !GetAtt ArtifactBucket.Arn
               - Sid: CodeDeployAccess
                 Effect: Allow
