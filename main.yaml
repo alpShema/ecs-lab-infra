@@ -5,64 +5,74 @@ Description: >
   CodePipeline, EventBridge, and GitHub Actions OIDC role.
 
 # ---------------------------------------------------------------------------
-# Parameters
+# Parameters — inputs that can be overridden without changing the template.
+# All resource names are derived from ProjectName so everything stays consistent.
 # ---------------------------------------------------------------------------
 Parameters:
   ProjectName:
     Type: String
     Default: ecs-lab
+    Description: Prefix used for all resource names (e.g. ecs-lab-vpc, ecs-lab-cluster).
 
   VpcCidr:
     Type: String
     Default: 10.0.0.0/16
+    Description: IP address range for the entire VPC.
 
   PublicSubnetACidr:
     Type: String
     Default: 10.0.1.0/24
+    Description: CIDR for the first public subnet (ALB) in AZ-a.
 
   PublicSubnetBCidr:
     Type: String
     Default: 10.0.2.0/24
+    Description: CIDR for the second public subnet (ALB) in AZ-b.
 
   PrivateSubnetACidr:
     Type: String
     Default: 10.0.3.0/24
+    Description: CIDR for the first private subnet (ECS tasks) in AZ-a.
 
   PrivateSubnetBCidr:
     Type: String
     Default: 10.0.4.0/24
+    Description: CIDR for the second private subnet (ECS tasks) in AZ-b.
 
   ContainerPort:
     Type: Number
     Default: 8080
+    Description: Port the Spring Boot application listens on inside the container.
 
   TaskCpu:
     Type: String
     Default: "512"
+    Description: CPU units for the Fargate task (512 = 0.5 vCPU).
 
   TaskMemory:
     Type: String
     Default: "1024"
+    Description: Memory in MB for the Fargate task.
 
   HealthCheckPath:
     Type: String
     Default: /actuator/health
+    Description: ALB and ECS health check endpoint — provided by Spring Boot Actuator.
 
   GitHubOrg:
     Type: String
     Default: alpShema
+    Description: GitHub username or organization — used to scope the OIDC trust condition.
 
   GitHubAppRepo:
     Type: String
     Default: ecs-lab-app
-
-  GitHubInfraRepo:
-    Type: String
-    Default: ecs-lab-infra
+    Description: GitHub repository name for the application code.
 
   GitHubBranch:
     Type: String
     Default: main
+    Description: Branch allowed to assume the GitHub Actions IAM role via OIDC.
 
 # ---------------------------------------------------------------------------
 # Resources
@@ -71,8 +81,13 @@ Resources:
 
   # ==========================================================================
   # NETWORK
+  # Two public subnets (ALB) and two private subnets (ECS tasks) across two
+  # Availability Zones for high availability. ECS tasks never have public IPs —
+  # all inbound traffic flows through the ALB.
   # ==========================================================================
 
+  # Isolated virtual network that all resources live inside.
+  # DNS settings are required for VPC Endpoints to resolve AWS service names privately.
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -85,6 +100,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Allows resources in public subnets to send and receive internet traffic.
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -94,12 +110,15 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Attaches the Internet Gateway to the VPC — required before any internet routing works.
   IGWAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
+  # Public subnet in AZ-a — hosts the ALB and NAT Gateway.
+  # MapPublicIpOnLaunch assigns a public IP to resources launched here.
   PublicSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -115,6 +134,7 @@ Resources:
         - Key: Tier
           Value: public
 
+  # Public subnet in AZ-b — second AZ for ALB multi-AZ availability.
   PublicSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
@@ -130,6 +150,8 @@ Resources:
         - Key: Tier
           Value: public
 
+  # Private subnet in AZ-a — ECS Fargate tasks run here with no public IP.
+  # Outbound internet access goes through NatGatewayA.
   PrivateSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -145,6 +167,7 @@ Resources:
         - Key: Tier
           Value: private
 
+  # Private subnet in AZ-b — second AZ for ECS task resilience.
   PrivateSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
@@ -160,6 +183,7 @@ Resources:
         - Key: Tier
           Value: private
 
+  # Static public IP for NatGatewayA. DependsOn ensures the IGW is attached first.
   EipA:
     Type: AWS::EC2::EIP
     DependsOn: IGWAttachment
@@ -171,6 +195,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Static public IP for NatGatewayB.
   EipB:
     Type: AWS::EC2::EIP
     DependsOn: IGWAttachment
@@ -182,6 +207,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # NAT Gateway in AZ-a — allows ECS tasks in PrivateSubnetA to reach the internet
+  # (e.g. pulling images) without being directly reachable from outside.
   NatGatewayA:
     Type: AWS::EC2::NatGateway
     Properties:
@@ -193,6 +220,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # NAT Gateway in AZ-b — keeps AZ-b tasks operational if AZ-a NAT fails.
   NatGatewayB:
     Type: AWS::EC2::NatGateway
     Properties:
@@ -204,6 +232,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Route table shared by both public subnets.
+  # All outbound traffic (0.0.0.0/0) goes directly to the Internet Gateway.
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -234,6 +264,8 @@ Resources:
       SubnetId: !Ref PublicSubnetB
       RouteTableId: !Ref PublicRouteTable
 
+  # Separate route table for PrivateSubnetA — outbound traffic goes through NatGatewayA.
+  # Each private subnet gets its own route table so AZ failures are isolated.
   PrivateRouteTableA:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -257,6 +289,7 @@ Resources:
       SubnetId: !Ref PrivateSubnetA
       RouteTableId: !Ref PrivateRouteTableA
 
+  # Route table for PrivateSubnetB — outbound traffic goes through NatGatewayB.
   PrivateRouteTableB:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -282,6 +315,8 @@ Resources:
 
   # ── Security Groups ───────────────────────────────────────────────────────
 
+  # ALB accepts HTTP on port 80 (production traffic) and port 8080 (test traffic
+  # used during blue/green deployments to validate the new version before go-live).
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -304,6 +339,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # ECS tasks only accept traffic from the ALB — never directly from the internet.
+  # Egress on 443 allows tasks to reach ECR and CloudWatch Logs via VPC Endpoints.
   EcsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -327,6 +364,9 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Defined as a separate resource to avoid a circular dependency.
+  # If ALB egress referenced ECS and ECS ingress referenced ALB in the same resource,
+  # CloudFormation cannot determine which to create first.
   AlbToEcsEgress:
     Type: AWS::EC2::SecurityGroupEgress
     Properties:
@@ -337,6 +377,7 @@ Resources:
       DestinationSecurityGroupId: !Ref EcsSecurityGroup
       Description: To ECS tasks only
 
+  # VPC Endpoints only accept HTTPS traffic from ECS tasks — nothing else in the VPC.
   VpcEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -355,7 +396,12 @@ Resources:
           Value: !Ref ProjectName
 
   # ── VPC Endpoints ─────────────────────────────────────────────────────────
+  # VPC Endpoints let ECS tasks reach AWS services privately without going through
+  # the NAT Gateway — traffic stays inside the AWS network, improving security
+  # and reducing data transfer costs.
 
+  # Allows ECS to pull Docker image layers from ECR privately.
+  # PrivateDnsEnabled makes the public ECR hostname resolve to a private IP inside the VPC.
   EcrDkrEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -369,6 +415,7 @@ Resources:
       SecurityGroupIds:
         - !Ref VpcEndpointSecurityGroup
 
+  # Allows ECS to call ECR API operations (auth token, describe repositories) privately.
   EcrApiEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -382,6 +429,9 @@ Resources:
       SecurityGroupIds:
         - !Ref VpcEndpointSecurityGroup
 
+  # Gateway endpoint for S3 — ECR stores image layers in S3, so this keeps
+  # image pulls entirely within the AWS network. Gateway endpoints are free
+  # and work by adding entries to the private route tables.
   S3Endpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -392,6 +442,7 @@ Resources:
         - !Ref PrivateRouteTableA
         - !Ref PrivateRouteTableB
 
+  # Allows ECS containers to send logs to CloudWatch Logs privately.
   CloudWatchLogsEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -406,9 +457,14 @@ Resources:
         - !Ref VpcEndpointSecurityGroup
 
   # ==========================================================================
-  # ECS / ECR / ALB
+  # ECR / LOGGING / IAM ROLES
   # ==========================================================================
 
+  # Container image registry for the application.
+  # IMMUTABLE tags prevent any image from being overwritten once pushed —
+  # every git SHA tag is permanent, guaranteeing deployment reproducibility.
+  # ScanOnPush checks each image for known CVE vulnerabilities automatically.
+  # The lifecycle policy keeps only the last 10 images to control storage costs.
   EcrRepository:
     Type: AWS::ECR::Repository
     Properties:
@@ -436,6 +492,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # CloudWatch Log Group where container stdout/stderr is sent.
+  # RetentionInDays automatically deletes logs older than 14 days to control costs.
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -445,6 +503,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Used by the ECS agent (not the application) to pull images from ECR
+  # and send logs to CloudWatch. The managed policy grants exactly these permissions.
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -462,6 +522,9 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Used by the application code running inside the container.
+  # Currently has no permissions — add policies here if the app needs to call
+  # AWS services (S3, DynamoDB, SQS, etc.). Keeping it empty follows least privilege.
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -477,6 +540,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Allows Application Auto Scaling to adjust the ECS service desired count.
   AutoScalingRole:
     Type: AWS::IAM::Role
     Properties:
@@ -494,6 +558,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Allows CodeDeploy to manage the blue/green deployment — register task definitions,
+  # update the ECS service, and shift traffic between ALB target groups.
   CodeDeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -511,6 +577,12 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # ==========================================================================
+  # ALB / TARGET GROUPS / LISTENERS
+  # ==========================================================================
+
+  # Internet-facing ALB placed in both public subnets for multi-AZ availability.
+  # All user traffic enters here — ECS tasks are never exposed directly.
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -526,6 +598,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Blue target group — holds the currently running (stable) version of the app.
+  # TargetType: ip is required for Fargate (tasks use IPs, not EC2 instance IDs).
   BlueTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -543,6 +617,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Green target group — holds the new version during a blue/green deployment.
+  # CodeDeploy routes test traffic here first, validates health, then switches production.
   GreenTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -560,6 +636,8 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Production listener — serves real user traffic on port 80, initially routed to Blue.
+  # CodeDeploy switches this to Green after a successful deployment.
   ProdListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -570,6 +648,8 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref BlueTargetGroup
 
+  # Test listener — serves validation traffic on port 8080, initially routed to Green.
+  # Used during deployment to verify the new version is healthy before going live.
   TestListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -580,6 +660,12 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref GreenTargetGroup
 
+  # ==========================================================================
+  # ECS CLUSTER / TASK DEFINITION / SERVICE / AUTO SCALING
+  # ==========================================================================
+
+  # Logical grouping for ECS tasks. Container Insights enabled for enhanced
+  # per-task CPU and memory metrics in CloudWatch.
   EcsCluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -591,6 +677,10 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Describes how to run the container — image, CPU, memory, networking, logging,
+  # environment variables, and health check. The image tag 'latest' is used here
+  # for the initial stack deployment only. All subsequent deployments use a specific
+  # git SHA tag injected by CodePipeline from imageDetail.json.
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -632,6 +722,10 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Runs and maintains the desired number of tasks, registers them with the ALB,
+  # and hands deployment control to CodeDeploy (CODE_DEPLOY type).
+  # Tasks run in private subnets with no public IP — only the ALB can reach them.
+  # DependsOn ensures both listeners exist before the service registers with the ALB.
   EcsService:
     Type: AWS::ECS::Service
     DependsOn:
@@ -661,6 +755,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Registers the ECS service as a scalable target — min 1 task, max 4 tasks.
   ScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
@@ -671,6 +766,10 @@ Resources:
       ServiceNamespace: ecs
       RoleARN: !GetAtt AutoScalingRole.Arn
 
+  # Scales tasks in/out based on average CPU utilization across all running tasks.
+  # Target: 70% CPU — adds tasks when above, removes when below.
+  # ScaleOutCooldown is short (60s) to respond quickly to traffic spikes.
+  # ScaleInCooldown is longer (300s) to avoid removing tasks too aggressively.
   ScaleOutPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
@@ -684,6 +783,11 @@ Resources:
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
 
+  # ==========================================================================
+  # CODEDEPLOY — BLUE/GREEN
+  # ==========================================================================
+
+  # Registers this as a CodeDeploy application targeting ECS (not EC2 or Lambda).
   CodeDeployApplication:
     Type: AWS::CodeDeploy::Application
     Properties:
@@ -693,6 +797,13 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Defines the blue/green deployment behaviour:
+  # - ECSAllAtOnce: shifts 100% of traffic at once (not canary/linear)
+  # - TerminationWaitTimeInMinutes: 5 — keeps old (Blue) tasks alive for 5 minutes
+  #   after traffic switches to Green, giving time to roll back if issues arise
+  # - CONTINUE_DEPLOYMENT: automatically proceeds without waiting for manual approval
+  # - ProdTrafficRoute / TestTrafficRoute: links the two ALB listeners so CodeDeploy
+  #   knows which carries production vs validation traffic
   CodeDeployDeploymentGroup:
     Type: AWS::CodeDeploy::DeploymentGroup
     Properties:
@@ -729,9 +840,12 @@ Resources:
           Value: !Ref ProjectName
 
   # ==========================================================================
-  # PIPELINE
+  # PIPELINE — S3 ARTIFACT BUCKET + IAM ROLES + CODEPIPELINE + EVENTBRIDGE
   # ==========================================================================
 
+  # S3 bucket that holds artifacts.zip (taskdef.json + imageDetail.json + appspec.yaml).
+  # Versioning is required by CodePipeline's S3 source action to detect new uploads.
+  # All public access is blocked. Old artifact versions are deleted after 30 days.
   ArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -757,6 +871,10 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Bucket policy with three rules:
+  # 1. Deny all access over plain HTTP (enforce HTTPS only)
+  # 2. Allow CodePipeline role to read artifacts during pipeline execution
+  # 3. Allow GitHub Actions role to upload artifacts.zip after building the image
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -796,19 +914,16 @@ Resources:
               - s3:GetObject
             Resource: !Sub ${ArtifactBucket.Arn}/*
 
-  # GitHubOIDCProvider:
-  #   Type: AWS::IAM::OIDCProvider
-  #   Properties:
-  #     Url: https://token.actions.githubusercontent.com
-  #     ClientIdList:
-  #       - sts.amazonaws.com
-  #     ThumbprintList:
-  #       - 6938fd4d98bab03faadb97b34396831e3780aea1
-  #       - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
-  #     Tags:
-  #       - Key: Project
-  #         Value: !Ref ProjectName
-
+  # IAM role assumed by GitHub Actions via OIDC — no long-lived AWS credentials needed.
+  # The Condition restricts access to a specific GitHub org, repo, and branch only.
+  # Any other repository or branch is denied, even with a valid GitHub token.
+  #
+  # Permissions granted:
+  # - ECRAuth: get a Docker login token (account-wide, required by AWS)
+  # - ECRPush: push images to this specific ECR repository
+  # - S3ArtifactUpload: upload artifacts.zip to the pipeline bucket
+  # - CloudFormationRead: read stack outputs to get TaskExecutionRoleArn and TaskRoleArn
+  # - PipelineTrigger: start the pipeline after the S3 upload completes
   GitHubActionsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -864,6 +979,14 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Service role used by CodePipeline to access other AWS services during execution.
+  #
+  # Permissions granted:
+  # - S3Access: read artifacts.zip from the source stage
+  # - S3BucketAccess: list bucket and check versioning (required by S3 source action)
+  # - CodeDeployAccess: create deployments and read deployment status
+  # - ECSAccess: register new task definition revisions
+  # - PassRole: pass TaskExecutionRole and TaskRole to ECS when registering a task definition
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -923,6 +1046,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Allows EventBridge to call StartPipelineExecution when an ECR push event fires.
   EventBridgeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -946,6 +1070,13 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Two-stage pipeline:
+  # Stage 1 (Source): reads artifacts.zip from S3. PollForSourceChanges is false —
+  # the pipeline is triggered explicitly by the GitHub Actions workflow after upload,
+  # not by constant polling.
+  # Stage 2 (Deploy): calls CodeDeployToECS. Image1ContainerName tells CodePipeline
+  # to replace the <IMAGE1_NAME> placeholder in taskdef.json with the ImageURI
+  # from imageDetail.json before registering the new task definition.
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -992,6 +1123,9 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # EventBridge rule that watches for successful image pushes to the ECR repository.
+  # This provides an automatic trigger in addition to the explicit pipeline start
+  # called by the GitHub Actions workflow after uploading artifacts.zip.
   EcrPushEventRule:
     Type: AWS::Events::Rule
     Properties:
@@ -1015,30 +1149,35 @@ Resources:
           Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
           RoleArn: !GetAtt EventBridgeRole.Arn
 
-# --------------------------------------------------------------------------
-# Outputs
+# ---------------------------------------------------------------------------
+# Outputs — values exported from the stack for use in GitHub repo variables
+# and by the GitHub Actions workflow at runtime.
 # ---------------------------------------------------------------------------
 Outputs:
   AlbEndpoint:
-    Description: Application URL
+    Description: Application URL — open this to see the live app.
     Value: !Sub http://${ALB.DNSName}
 
   GitHubActionsRoleArn:
-    Description: Set as AWS_ROLE_ARN secret in ecs-lab-app repo
+    Description: Set as AWS_ROLE_ARN variable in the ecs-lab-app GitHub repo.
     Value: !GetAtt GitHubActionsRole.Arn
 
   ArtifactBucketName:
-    Description: Set as PIPELINE_ARTIFACT_BUCKET secret in ecs-lab-app repo
+    Description: Set as PIPELINE_ARTIFACT_BUCKET variable in the ecs-lab-app GitHub repo.
     Value: !Ref ArtifactBucket
 
   TaskExecutionRoleArn:
+    Description: Read by the GitHub Actions workflow to build taskdef.json.
     Value: !GetAtt TaskExecutionRole.Arn
 
   TaskRoleArn:
+    Description: Read by the GitHub Actions workflow to build taskdef.json.
     Value: !GetAtt TaskRole.Arn
 
   EcrRepositoryUri:
+    Description: ECR registry URI — the destination for docker push.
     Value: !GetAtt EcrRepository.RepositoryUri
 
   PipelineUrl:
+    Description: Direct link to the CodePipeline dashboard.
     Value: !Sub https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${Pipeline}/view
