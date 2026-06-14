@@ -79,12 +79,10 @@ Parameters:
 # ---------------------------------------------------------------------------
 Resources:
 
-  # ==========================================================================
   # NETWORK
   # Two public subnets (ALB) and two private subnets (ECS tasks) across two
   # Availability Zones for high availability. ECS tasks never have public IPs —
   # all inbound traffic flows through the ALB.
-  # ==========================================================================
 
   # Isolated virtual network that all resources live inside.
   # DNS settings are required for VPC Endpoints to resolve AWS service names privately.
@@ -577,9 +575,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # ==========================================================================
   # ALB / TARGET GROUPS / LISTENERS
-  # ==========================================================================
 
   # Internet-facing ALB placed in both public subnets for multi-AZ availability.
   # All user traffic enters here — ECS tasks are never exposed directly.
@@ -660,9 +656,7 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref GreenTargetGroup
 
-  # ==========================================================================
   # ECS CLUSTER / TASK DEFINITION / SERVICE / AUTO SCALING
-  # ==========================================================================
 
   # Logical grouping for ECS tasks. Container Insights enabled for enhanced
   # per-task CPU and memory metrics in CloudWatch.
@@ -783,9 +777,7 @@ Resources:
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
 
-  # ==========================================================================
   # CODEDEPLOY — BLUE/GREEN
-  # ==========================================================================
 
   # Registers this as a CodeDeploy application targeting ECS (not EC2 or Lambda).
   CodeDeployApplication:
@@ -839,9 +831,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # ==========================================================================
   # PIPELINE — S3 ARTIFACT BUCKET + IAM ROLES + CODEPIPELINE + EVENTBRIDGE
-  # ==========================================================================
 
   # S3 bucket that holds artifacts.zip (taskdef.json + imageDetail.json + appspec.yaml).
   # Versioning is required by CodePipeline's S3 source action to detect new uploads.
