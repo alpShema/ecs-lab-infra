@@ -713,7 +713,7 @@ Resources:
           HealthCheck:
             Command:
               - CMD-SHELL
-              - !Sub "curl -f http://localhost:${ContainerPort}/actuator/health || exit 1"
+              - !Sub "wget -q -O- http://localhost:${ContainerPort}/actuator/health || exit 1"
             Interval: 30
             Timeout: 5
             Retries: 3
