@@ -13,7 +13,6 @@ parameters:
   ProjectName: ecs-lab
   GitHubOrg: alpShema
   GitHubAppRepo: ecs-lab-app
-  GitHubInfraRepo: ecs-lab-infra
   GitHubBranch: main
   ContainerPort: "8080"
   HealthCheckPath: /actuator/health
