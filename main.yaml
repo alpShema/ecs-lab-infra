@@ -181,55 +181,6 @@ Resources:
         - Key: Tier
           Value: private
 
-  # Static public IP for NatGatewayA. DependsOn ensures the IGW is attached first.
-  EipA:
-    Type: AWS::EC2::EIP
-    DependsOn: IGWAttachment
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-eip-a
-        - Key: Project
-          Value: !Ref ProjectName
-
-  # Static public IP for NatGatewayB.
-  EipB:
-    Type: AWS::EC2::EIP
-    DependsOn: IGWAttachment
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-eip-b
-        - Key: Project
-          Value: !Ref ProjectName
-
-  # NAT Gateway in AZ-a — allows ECS tasks in PrivateSubnetA to reach the internet
-  # (e.g. pulling images) without being directly reachable from outside.
-  NatGatewayA:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt EipA.AllocationId
-      SubnetId: !Ref PublicSubnetA
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-nat-a
-        - Key: Project
-          Value: !Ref ProjectName
-
-  # NAT Gateway in AZ-b — keeps AZ-b tasks operational if AZ-a NAT fails.
-  NatGatewayB:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt EipB.AllocationId
-      SubnetId: !Ref PublicSubnetB
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-nat-b
-        - Key: Project
-          Value: !Ref ProjectName
-
   # Route table shared by both public subnets.
   # All outbound traffic (0.0.0.0/0) goes directly to the Internet Gateway.
   PublicRouteTable:
@@ -262,8 +213,8 @@ Resources:
       SubnetId: !Ref PublicSubnetB
       RouteTableId: !Ref PublicRouteTable
 
-  # Separate route table for PrivateSubnetA — outbound traffic goes through NatGatewayA.
-  # Each private subnet gets its own route table so AZ failures are isolated.
+  # Route table for PrivateSubnetA — no default internet route.
+  # All internet-bound traffic uses VPC Endpoints (ECR, S3, CloudWatch Logs).
   PrivateRouteTableA:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -274,20 +225,14 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  PrivateRouteA:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTableA
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGatewayA
-
   PrivateSubnetARouteTableAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetA
       RouteTableId: !Ref PrivateRouteTableA
 
-  # Route table for PrivateSubnetB — outbound traffic goes through NatGatewayB.
+  # Route table for PrivateSubnetB — no default internet route.
+  # All internet-bound traffic uses VPC Endpoints (ECR, S3, CloudWatch Logs).
   PrivateRouteTableB:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -297,13 +242,6 @@ Resources:
           Value: !Sub ${ProjectName}-private-rt-b
         - Key: Project
           Value: !Ref ProjectName
-
-  PrivateRouteB:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTableB
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGatewayB
 
   PrivateSubnetBRouteTableAssoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
