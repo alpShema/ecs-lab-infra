@@ -957,10 +957,6 @@ Resources:
                   - s3:PutObject
                   - s3:GetObject
                 Resource: !Sub ${ArtifactBucket.Arn}/*
-              - Sid: CloudFormationRead
-                Effect: Allow
-                Action: cloudformation:DescribeStacks
-                Resource: '*'
               - Sid: PipelineTrigger
                 Effect: Allow
                 Action: codepipeline:StartPipelineExecution
