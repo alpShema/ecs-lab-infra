@@ -459,8 +459,7 @@ Resources:
           Value: !Ref ProjectName
 
   # Used by the application code running inside the container.
-  # Currently has no permissions — add policies here if the app needs to call
-  # AWS services (S3, DynamoDB, SQS, etc.). Keeping it empty follows least privilege.
+
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -533,7 +532,7 @@ Resources:
           Value: !Ref ProjectName
 
   # Blue target group — holds the currently running (stable) version of the app.
-  # TargetType: ip is required for Fargate (tasks use IPs, not EC2 instance IDs).
+  # TargetType: ip is required for Fargate .
   BlueTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -609,10 +608,9 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Describes how to run the container — image, CPU, memory, networking, logging,
+  # image, CPU, memory, networking, logging,
   # environment variables, and health check. The image tag 'latest' is used here
-  # for the initial stack deployment only. All subsequent deployments use a specific
-  # git SHA tag injected by CodePipeline from imageDetail.json.
+  # for the initial stack deployment only.
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -655,8 +653,6 @@ Resources:
           Value: !Ref ProjectName
 
   # Runs and maintains the desired number of tasks, registers them with the ALB,
-  # and hands deployment control to CodeDeploy (CODE_DEPLOY type).
-  # Tasks run in private subnets with no public IP — only the ALB can reach them.
   # DependsOn ensures both listeners exist before the service registers with the ALB.
   EcsService:
     Type: AWS::ECS::Service
@@ -800,9 +796,9 @@ Resources:
           Value: !Ref ProjectName
 
   # Bucket policy with three rules:
-  # 1. Deny all access over plain HTTP (enforce HTTPS only)
-  # 2. Allow CodePipeline role to read artifacts during pipeline execution
-  # 3. Allow GitHub Actions role to upload artifacts.zip after building the image
+  #  Deny all access over plain HTTP (enforce HTTPS only)
+  # Allow CodePipeline role to read artifacts during pipeline execution
+  # Allow GitHub Actions role to upload artifacts.zip after building the image
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -843,15 +839,7 @@ Resources:
             Resource: !Sub ${ArtifactBucket.Arn}/*
 
   # IAM role assumed by GitHub Actions via OIDC — no long-lived AWS credentials needed.
-  # The Condition restricts access to a specific GitHub org, repo, and branch only.
-  # Any other repository or branch is denied, even with a valid GitHub token.
-  #
-  # Permissions granted:
-  # - ECRAuth: get a Docker login token (account-wide, required by AWS)
-  # - ECRPush: push images to this specific ECR repository
-  # - S3ArtifactUpload: upload artifacts.zip to the pipeline bucket
-  # - CloudFormationRead: read stack outputs to get TaskExecutionRoleArn and TaskRoleArn
-  # - PipelineTrigger: start the pipeline after the S3 upload completes
+ 
   GitHubActionsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -904,13 +892,7 @@ Resources:
           Value: !Ref ProjectName
 
   # Service role used by CodePipeline to access other AWS services during execution.
-  #
-  # Permissions granted:
-  # - S3Access: read artifacts.zip from the source stage
-  # - S3BucketAccess: list bucket and check versioning (required by S3 source action)
-  # - CodeDeployAccess: create deployments and read deployment status
-  # - ECSAccess: register new task definition revisions
-  # - PassRole: pass TaskExecutionRole and TaskRole to ECS when registering a task definition
+ 
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -995,12 +977,8 @@ Resources:
           Value: !Ref ProjectName
 
   # Two-stage pipeline:
-  # Stage 1 (Source): reads artifacts.zip from S3. PollForSourceChanges is false —
-  # the pipeline is triggered explicitly by the GitHub Actions workflow after upload,
-  # not by constant polling.
-  # Stage 2 (Deploy): calls CodeDeployToECS. Image1ContainerName tells CodePipeline
-  # to replace the <IMAGE1_NAME> placeholder in taskdef.json with the ImageURI
-  # from imageDetail.json before registering the new task definition.
+  # Stage 1 (Source): reads artifacts.zip from S3. 
+  # Stage 2 (Deploy): calls CodeDeployToECS. 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
